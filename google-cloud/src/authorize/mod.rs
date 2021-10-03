@@ -50,6 +50,13 @@ pub(crate) struct Token {
     expiry: DateTime<Utc>,
 }
 
+/// added by i110
+#[async_trait::async_trait]
+pub trait Authorizer {
+    /// added by i110
+    async fn token(&mut self) -> Result<String, AuthError>;
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct TokenManager {
     client: Client<HttpsConnector<HttpConnector>>,
@@ -72,8 +79,11 @@ impl TokenManager {
             current_token: None,
         }
     }
+}
 
-    pub(crate) async fn token(&mut self) -> Result<String, AuthError> {
+#[async_trait::async_trait]
+impl Authorizer for TokenManager {
+    async fn token(&mut self) -> Result<String, AuthError> {
         let hour = chrono::Duration::minutes(45);
         let current_time = chrono::Utc::now();
         match self.current_token {

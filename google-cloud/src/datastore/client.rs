@@ -8,7 +8,7 @@ use tokio::sync::Mutex;
 use tonic::transport::{Certificate, Channel, ClientTlsConfig};
 use tonic::{IntoRequest, Request};
 
-use crate::authorize::{ApplicationCredentials, TokenManager, TLS_CERTS};
+use crate::authorize::{ApplicationCredentials, Authorizer, TokenManager, TLS_CERTS};
 use crate::datastore::api;
 use crate::datastore::api::datastore_client::DatastoreClient;
 use crate::datastore::api::value::ValueType;
@@ -21,7 +21,7 @@ use crate::datastore::{
 pub struct Client {
     pub(crate) project_name: String,
     pub(crate) service: DatastoreClient<Channel>,
-    pub(crate) token_manager: Arc<Mutex<TokenManager>>,
+    pub(crate) authorizer: Arc<Mutex<Box<dyn Authorizer + Send>>>,
 }
 
 impl Client {
@@ -37,7 +37,7 @@ impl Client {
         request: T,
     ) -> Result<Request<T>, Error> {
         let mut request = request.into_request();
-        let token = self.token_manager.lock().await.token().await?;
+        let token = self.authorizer.lock().await.token().await?;
         let metadata = request.metadata_mut();
         metadata.insert("authorization", token.parse().unwrap());
         Ok(request)
@@ -59,6 +59,17 @@ impl Client {
         project_name: impl Into<String>,
         creds: ApplicationCredentials,
     ) -> Result<Client, Error> {
+        Self::from_authorizer(project_name, TokenManager::new(
+            creds,
+            Client::SCOPES.as_ref(),
+        )).await
+    }
+
+    /// added by i110
+    pub async fn from_authorizer(
+        project_name: impl Into<String>,
+        authorizer: impl Authorizer + Send + 'static
+    ) -> Result<Client, Error> {
         let tls_config = ClientTlsConfig::new()
             .ca_certificate(Certificate::from_pem(TLS_CERTS))
             .domain_name(Client::DOMAIN_NAME);
@@ -71,10 +82,7 @@ impl Client {
         Ok(Client {
             project_name: project_name.into(),
             service: DatastoreClient::new(channel),
-            token_manager: Arc::new(Mutex::new(TokenManager::new(
-                creds,
-                Client::SCOPES.as_ref(),
-            ))),
+            authorizer: Arc::new(Mutex::new(Box::new(authorizer))),
         })
     }
 

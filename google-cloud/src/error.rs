@@ -64,4 +64,7 @@ pub enum AuthError {
     /// Hyper errors
     #[error("Hyper error: {0}")]
     Hyper(#[from] hyper::Error),
+    /// added by i110
+    #[error("Unknown error: {0}")]
+    Unknown(String),
 }

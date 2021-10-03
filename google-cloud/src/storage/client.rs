@@ -6,7 +6,7 @@ use json::json;
 use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 use tokio::sync::Mutex;
 
-use crate::authorize::{ApplicationCredentials, TokenManager};
+use crate::authorize::{ApplicationCredentials, Authorizer, TokenManager};
 use crate::storage::api::bucket::{BucketResource, BucketResources};
 use crate::storage::{Bucket, Error};
 
@@ -15,7 +15,7 @@ use crate::storage::{Bucket, Error};
 pub struct Client {
     pub(crate) project_name: String,
     pub(crate) client: Arc<reqwest::Client>,
-    pub(crate) token_manager: Arc<Mutex<TokenManager>>,
+    pub(crate) authorizer: Arc<Mutex<Box<dyn Authorizer + Send>>>,
 }
 
 impl Client {
@@ -54,6 +54,17 @@ impl Client {
         project_name: impl Into<String>,
         creds: ApplicationCredentials,
     ) -> Result<Client, Error> {
+        Self::from_authorizer(project_name, TokenManager::new(
+            creds,
+            Client::SCOPES.as_ref(),
+        )).await
+    }
+
+    /// added by i110
+    pub async fn from_authorizer(
+        project_name: impl Into<String>,
+        authorizer: impl Authorizer + Send + 'static
+    ) -> Result<Client, Error> {
         // let certificate = reqwest::Certificate::from_pem(TLS_CERTS)?;
         let client = reqwest::Client::builder()
             // .add_root_certificate(certificate)
@@ -62,10 +73,7 @@ impl Client {
         Ok(Client {
             client: Arc::new(client),
             project_name: project_name.into(),
-            token_manager: Arc::new(Mutex::new(TokenManager::new(
-                creds,
-                Client::SCOPES.as_ref(),
-            ))),
+            authorizer: Arc::new(Mutex::new(Box::new(authorizer))),
         })
     }
 
@@ -78,7 +86,7 @@ impl Client {
             utf8_percent_encode(name, NON_ALPHANUMERIC),
         );
 
-        let token = self.token_manager.lock().await.token().await?;
+        let token = self.authorizer.lock().await.token().await?;
         let request = inner
             .get(uri.as_str())
             .header("authorization", token)
@@ -97,7 +105,7 @@ impl Client {
         let inner = &self.client;
         let uri = format!("{}/b", Client::ENDPOINT);
 
-        let token = self.token_manager.lock().await.token().await?;
+        let token = self.authorizer.lock().await.token().await?;
         let request = inner
             .get(uri.as_str())
             .query(&[("project", self.project_name.as_str())])
@@ -127,7 +135,7 @@ impl Client {
             "kind": "storage#bucket",
             "name": name,
         });
-        let token = self.token_manager.lock().await.token().await?;
+        let token = self.authorizer.lock().await.token().await?;
         let request = inner
             .post(uri.as_str())
             .query(&[("project", self.project_name.as_str())])

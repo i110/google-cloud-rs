@@ -54,7 +54,7 @@ impl Object {
             utf8_percent_encode(&self.name, NON_ALPHANUMERIC),
         );
 
-        let token = client.token_manager.lock().await.token().await?;
+        let token = client.authorizer.lock().await.token().await?;
         let request = inner
             .get(uri.as_str())
             .query(&[("alt", "media")])
@@ -77,7 +77,7 @@ impl Object {
             utf8_percent_encode(&self.name, NON_ALPHANUMERIC),
         );
 
-        let token = client.token_manager.lock().await.token().await?;
+        let token = client.authorizer.lock().await.token().await?;
         let request = inner
             .delete(uri.as_str())
             .header("authorization", token)
